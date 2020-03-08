@@ -1,4 +1,4 @@
-//#include "config.h"
+#include "config.h"
 
 typedef unsigned char      u8;
 typedef signed   char      s8;
@@ -8,6 +8,8 @@ typedef unsigned int       u32;
 typedef signed   int       s32;
 typedef unsigned long long u64;
 typedef signed   long long s64;
+
+#define noreturn __attribute__((noreturn)) void
 
 typedef enum bool {
     false,
@@ -146,11 +148,6 @@ u8 scan(void)
     else return 0;
 }
 
-
-struct {
-    s8 x, y; /* Coordinates */
-} current;
-
 #define TITLE_X (COLS / 2 - 9)
 #define TITLE_Y (ROWS / 5)
 
@@ -171,20 +168,75 @@ void start_menu(){
     puts(TITLE_X + 6,  TITLE_Y + 2, BRIGHT,           BLUE,    "---");
     puts(TITLE_X + 9,  TITLE_Y + 2, BRIGHT,           GREEN,   "---");
 
-    puts(TITLE_X-10, TITLE_Y + 5, BRIGHT, BLACK, "Principios De Sistemas Operativos");
-    puts(TITLE_X-10, TITLE_Y + 6, BRIGHT, BLACK, "Profesor: Ernesto Rivera Alvarado");
-    puts(TITLE_X-5, TITLE_Y + 7, BRIGHT, BLACK, "Integantes");
-    puts(TITLE_X, TITLE_Y + 8, BRIGHT, BLACK, "Daniel Blanco Vargas");
-    puts(TITLE_X, TITLE_Y + 9, BRIGHT, BLACK, "Carlos");
-    puts(TITLE_X, TITLE_Y + 10, BRIGHT, BLACK, "Gerardo");
+    puts(TITLE_X - 5,  TITLE_Y + 4, RED,           BLACK,   "PRESS SPACE TO START");
+    puts(TITLE_X-10, TITLE_Y + 6, BRIGHT, BLACK, "Principios De Sistemas Operativos");
+    puts(TITLE_X-10, TITLE_Y + 7, BRIGHT, BLACK, "Profesor: Ernesto Rivera Alvarado");
+    puts(TITLE_X-5, TITLE_Y + 8, BRIGHT, BLACK, "Integantes");
+    puts(TITLE_X, TITLE_Y + 9, BRIGHT, BLACK, "Daniel Blanco Vargas");
+    puts(TITLE_X, TITLE_Y + 10, BRIGHT, BLACK, "Carlos");
+    puts(TITLE_X, TITLE_Y + 11, BRIGHT, BLACK, "Gerardo");
+
+    bool flag = true;
+    while(flag){
+        u8 key;
+        if ((key = scan())) {
+            if(key == KEY_SPACE){
+                flag = false;
+            }
+        }
+    }
 
 }
 
-#define WELL_WIDTH  (17)
-#define WELL_HEIGHT (13)
+u8 space[WELL_HEIGHT][WELL_WIDTH];
 
-#define WELL_Y (COLS / 2 - 10)
-#define WELL_X (ROWS / 5)
+struct {
+    s8 x, y; /* Coordinates */
+} spaceship;
+
+
+#define WELL_Y (COLS / 2 - 10) //Numero de columna donde inica la primer pared
+#define WELL_X (ROWS / 5) //Numero de fila donde inicia la pantalla
+
+/* Return true if the tetrimino i in rotation r will collide when placed at x,
+ * y. */
+bool collide(s8 x, s8 y)
+{
+
+    if (y >= WELL_Y + 17 || y <= WELL_Y-1){
+        return true;
+    }
+    return false;
+}
+
+
+/* Set the current tetrimino to the preview tetrimino in the default rotation
+ * and place it in the top center. Increase the stats count for the spawned
+ * tetrimino. Set the preview tetrimino to the next one in the shuffled bag. If
+ * the spawned tetrimino was the last in the bag, re-shuffle the bag and set
+ * the preview to the first in the bag. */
+void spawn(void)
+{
+    spaceship.x = WELL_HEIGHT + 5;
+    spaceship.y = WELL_Y + 8;
+}
+
+/* Try to move the current tetrimino by dx, dy and return true if successful.
+ */
+bool move(s8 dy, s8 dx)
+{
+    /*if (game_over)
+        return false;*/
+
+    if (collide(spaceship.x + dx, spaceship.y + dy)){
+        return false;}
+    spaceship.x += dx;
+    spaceship.y += dy;
+    return true;
+}
+
+void shot_up(s8 dy, s8 dx)
+
 /* Draw the well, current tetrimino, its ghost, the preview tetrimino, the
  * status, score and level indicators. Each well/tetrimino cell is drawn one
  * screen-row high and two screen-columns wide. The top two rows of the well
@@ -199,33 +251,75 @@ void draw_first_stage(void) {
         putc(WELL_Y + 18, x + WELL_X, BLACK, GREEN, ' ');
         x++;
     }
-    /*
-    for (y = 0; y < WELL_WIDTH; y++) {
-        putc(y + WELL_Y, WELL_HEIGHT, BLACK, GRAY, ' ');
-        y++;
-    }*/
+
+    /* Spaceship */
+    puts(spaceship.y, spaceship.x, GREEN, BLACK, "<^>");
+}
+void first_stage(void){
+    //bool updated = false;
+
+    while(true) {
+        u8 key1;
+        bool updated = false;
+        if ((key1 = scan())) {
+
+            switch (key1) {
+                case KEY_LEFT:
+                    move(-5, 0);
+                    break;
+                case KEY_RIGHT:
+                    move(5, 0);
+                    break;
+            }
+            updated = true;
+        }
+        if (updated) {
+            clear(BLACK);
+            draw_first_stage();
+        }
+    }
+    //goto loop;
 }
 
+noreturn main() {
 
-void main(void){
- start_menu();
- clear(BLACK);
- puts(TITLE_X, TITLE_Y + 10, BRIGHT, BLACK, "El otro mae");
+    clear(BLACK);
+    start_menu();
 
- while (true){
-    //tps();
+    /* Wait a full second to calibrate timing. */
+    /*u32 itpms;
+    tps();
+    itpms = tpms; while (tpms == itpms) tps();
+    itpms = tpms; while (tpms == itpms) tps();
+*/
+    spawn();
+    clear(BLACK);
+    draw_first_stage();
+
+    loop:
+    tps();
+
+    bool updated = false;
+
     u8 key;
-    bool flag = false;
     if ((key = scan())) {
-       if(key == KEY_SPACE){
-             flag = true;
-         }
+        switch(key) {
+            case KEY_LEFT:
+                move(-1, 0);
+                break;
+            case KEY_RIGHT:
+                move(1, 0);
+                break;
+        }
+        updated = true;
     }
 
-    if(flag){
+    if (updated) {
         clear(BLACK);
         draw_first_stage();
     }
-    //goto loop;
-    }
+
+    goto loop;
 }
+
+
