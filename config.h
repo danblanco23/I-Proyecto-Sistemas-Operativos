@@ -4,8 +4,8 @@
 #define TETRIS_URL     "https://github.com/programble/bare-metal-tetris"
 
 /* Tetris well dimensions */
-#define WELL_WIDTH  (17)
-#define WELL_HEIGHT (13)
+#define WELL_WIDTH  (31)
+#define WELL_HEIGHT (20)
 
 /* Initial interval in milliseconds at which to apply gravity */
 #define INITIAL_SPEED (1000)

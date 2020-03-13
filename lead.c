@@ -36,7 +36,7 @@ static inline void outb(u16 p, u8 d)
 static inline u64 rdtsc(void)
 {
     u32 hi, lo;
-    asm("rdtsc" : "=a" (lo), "=d" (hi));
+    asm("rdtsc" : "=q" (lo), "=d" (hi));
     return ((u64) lo) | (((u64) hi) << 32);
 }
 
@@ -74,6 +74,51 @@ void tps(void)
         tpms = (u32) ((tf - ti) >> 3) / 125; /* Less chance of truncation */
         ti = tf;
     }
+}
+
+/* IDs used to keep separate timing operations separate */
+enum timer {
+    TIMER_UPDATE,
+    TIMER_CLEAR,
+    TIMER__LENGTH
+};
+
+u64 timers[TIMER__LENGTH] = {0};
+
+/* Return true if at least ms milliseconds have elapsed since the last call
+ * that returned true for this timer. When called on each iteration of the main
+ * loop, has the effect of returning true once every ms milliseconds. */
+bool interval(enum timer timer, u32 ms)
+{
+    u64 tf = rdtsc();
+    if (tf - timers[timer] >= tpms * ms) {
+        timers[timer] = tf;
+        return true;
+    } else return false;
+}
+
+/* Return true if at least ms milliseconds have elapsed since the first call
+ * for this timer and reset the timer. */
+bool wait(enum timer timer, u32 ms)
+{
+    if (timers[timer]) {
+        if (rdtsc() - timers[timer] >= tpms * ms) {
+            timers[timer] = 0;
+            return true;
+        } else return false;
+    } else {
+        timers[timer] = rdtsc();
+        return false;
+    }
+}
+
+/* Random */
+
+/* Generate a random number from 0 inclusive to range exclusive from the number
+ * of CPU ticks since boot. */
+u32 rand(u32 range)
+{
+    return (u32) rdtsc() % range;
 }
 
 /* Video Output */
@@ -190,39 +235,62 @@ void start_menu(){
 
 u8 space[WELL_HEIGHT][WELL_WIDTH];
 
+u32 score = 0, level = 1, speed = 1000;
+
+bool paused = false, game_over = false;
+
 struct {
-    s8 x, y; /* Coordinates */
+    s8 x, y;
 } spaceship;
 
+struct shot{
+    s8 x, y;
+    bool available;
+};
+
+struct enemy{
+    s8 x, y;
+    bool available;
+} enemy1;
+
+bool shooting = false;
+u64 counter = 100000;
 
 #define WELL_Y (COLS / 2 - 10) //Numero de columna donde inica la primer pared
-#define WELL_X (ROWS / 5) //Numero de fila donde inicia la pantalla
+#define WELL_X (ROWS - ROWS + 2) //Numero de fila donde inicia la pantalla
 
-/* Return true if the tetrimino i in rotation r will collide when placed at x,
- * y. */
+/* Verifica si la nave se va a pasar de la pared
+ * true si se pasa
+ * false si no*/
 bool collide(s8 x, s8 y)
 {
 
-    if (y >= WELL_Y + 17 || y <= WELL_Y-1){
+    if (y >= WELL_Y + WELL_WIDTH -1 || y <= WELL_Y-1){
         return true;
     }
     return false;
 }
 
-
-/* Set the current tetrimino to the preview tetrimino in the default rotation
- * and place it in the top center. Increase the stats count for the spawned
- * tetrimino. Set the preview tetrimino to the next one in the shuffled bag. If
- * the spawned tetrimino was the last in the bag, re-shuffle the bag and set
- * the preview to the first in the bag. */
-void spawn(void)
+/* Clear the screen to bg backround color. */
+void clear_space(enum color bg)
 {
-    spaceship.x = WELL_HEIGHT + 5;
-    spaceship.y = WELL_Y + 8;
+    u8 x, y;
+    for (y = WELL_X+1; y < WELL_WIDTH; y++)
+        for (x = WELL_Y+1; x < WELL_HEIGHT; x++)
+            putc(x, y, bg, bg, ' ');
 }
 
-/* Try to move the current tetrimino by dx, dy and return true if successful.
- */
+
+/*Posicion inicial de la nave*/
+void spawn(void)
+{
+    spaceship.x = WELL_HEIGHT + 1;
+    spaceship.y = WELL_Y + (WELL_WIDTH / 2);
+}
+
+/*actualiza las cordenadas de la nave cuando se va a mover
+ * retorna false si choca con una pared
+ * true si no*/
 bool move(s8 dy, s8 dx)
 {
     /*if (game_over)
@@ -235,32 +303,240 @@ bool move(s8 dy, s8 dx)
     return true;
 }
 
-void shot_up(s8 dy, s8 dx)
+void update_spaceship(){
+    puts(spaceship.y, spaceship.x, GREEN, BLACK, "<^>");
+}
 
-/* Draw the well, current tetrimino, its ghost, the preview tetrimino, the
- * status, score and level indicators. Each well/tetrimino cell is drawn one
- * screen-row high and two screen-columns wide. The top two rows of the well
- * are hidden. Rows in the cleared_rows array are drawn as white rather than
- * their actual colors. */
-void draw_first_stage(void) {
+struct shot shots[2] = {
+        {0, 0, false},
+        {0, 0, false},
+        {0, 0, false}
+};
+
+struct shot current_shot;
+
+/* shot */
+/*Posicion inicial del disparo*/
+void spawn_shot(){
+
+    for(u32 i = 0; i < 2; i++){
+        if (shots[i].available == false){
+            current_shot = shots[i];
+            shots[i].available = true;
+            puts(0, 10, BLUE, BLACK, "<^>");
+            //current_shot.available = true;
+            break;
+        }
+
+    }
+
+    current_shot.x = spaceship.x;
+    current_shot.y = spaceship.y + 1;
+}
+
+/*verifica si el disparo llego al inicio de la pantalla
+ * true si lo hace
+ * false si no*/
+bool collide_shot(s8 x, s8 y){
+    if (current_shot.x < WELL_X){
+        return true;
+    }
+    return false;
+}
+
+bool move_shot(s8 dx){
+    /*if (game_over)
+        return false;*/
+
+    if (collide_shot(current_shot.x + dx, current_shot.y)){
+        return false;
+    }
+    return true;
+}
+
+
+void update_shot(){
+
+    /*if(shooting){
+         putc(shot1.y,shot1.x,BLACK,BLACK,' ');
+         if(move_shot1(0, -1)){
+             putc(shot1.y, shot2.x, BRIGHT, RED, ' ');
+         }
+     }
+     if(move_shot1(0, -1) == false){
+         shooting = false;
+         spawn_shot1();
+     }*/
+    if(current_shot.available == false && move_shot(current_shot.x - 1)){
+        if (current_shot.x == enemy1.x && (current_shot.y == enemy1.y || current_shot.y == enemy1.y+1 || current_shot.y == enemy1.y+2 || current_shot.y == enemy1.y+3)){
+            puts(enemy1.y, enemy1.x, BLACK, BLACK, "    ");
+            putc(current_shot.y, current_shot.x, BLACK, BLACK, ' ');
+            //spawn_shot();
+            spawn_enemy();
+            counter = 100000;
+        }
+        else{
+            puts(0, 0, CYAN, BLACK, "<^>");
+            putc(current_shot.y, current_shot.x, BLACK, BLACK, ' ');
+            current_shot.x = current_shot.x - 1;
+            putc(current_shot.y, current_shot.x, BLACK, RED, ' ');
+        }
+    }
+    else{
+        //puts(enemy1.y, enemy1.x, BLACK, BLACK, "    ");
+        //spawn_enemy();
+        //counter = 100000;
+        putc(current_shot.y, current_shot.x, BLACK, BLACK, ' ');
+    }
+    /*
+    if(current_shot.available == false) {
+        puts(0, 0, CYAN, BLACK, "<^>");
+        putc(current_shot.y, current_shot.x, BLACK, BLACK, ' ');
+        current_shot.x = current_shot.x - 1;
+        putc(current_shot.y, current_shot.x, BLACK, RED, ' ');
+    }
+    */
+    /*
+    if(current_shot.x < WELL_X){
+        //putc(25,5,BLACK,GREEN,shotActive);
+        //shooting=false;
+        //spawn_shot();
+        putc(current_shot.y, current_shot.x, BLACK, BLACK, ' ');
+        //current_shot.available = true;
+        //clear(BLACK);
+    }*/
+    //spawn()
+}
+
+void update(void)
+{
+    //update_spaceship();
+    update_shot();
+    /*double speed_s = pow(0.8 - (level - 1) * 0.007, level - 1);
+    speed = speed_s * 1000;*/
+
+}
+
+
+/* shot 2*/
+/*Posicion inicial del disparo*/
+/*void spawn_shot2(){
+    puts(0, 10, MAGENTA, BLACK, "<^>");
+    shot1.x = spaceship.x ;
+    shot1.y = spaceship.y + 1;
+}
+
+/*verifica si el disparo llego al inicio de la pantalla
+ * true si lo hace
+ * false si no*/
+/*bool collide_shot2()
+{
+    if (shot2.x <= WELL_X){
+        return true;
+    }
+    return false;
+}
+
+bool move_shot2(s8 dy, s8 dx)
+{
+    /*if (game_over)
+        return false;*/
+
+    /*if (collide_shot2(shot.x + dx, shot.y + dy)){
+        return false;}*/
+  /*  shot2.x += dx;
+    shot2.y += dy;
+    return true;
+}
+
+
+void update_shot2()
+{
+    if(shooting){
+        putc(shot2.y,shot2.x,BLACK,BLACK,' ');
+        shot2.x = shot2.x-1;
+        putc(shot2.y,shot2.x,BLACK,RED,' ');
+    }
+    if(shot2.x < WELL_X){
+        //putc(25,5,BLACK,GREEN,shotActive);
+        shooting=false;
+        spawn_shot2();
+        clear(BLACK);
+    }
+}*/
+
+void spawn_enemy(){
+    enemy1.x = 4;
+    u32 random = 0;
+    random = rand(26);
+    random = random + 31;
+    enemy1.y = random;
+
+}
+
+void move_enemy(){
+
+    puts(enemy1.y,enemy1.x,BLACK,BLACK,"    ");
+    enemy1.x = enemy1.x + 1;
+    puts(enemy1.y,enemy1.x,BLUE,BLACK,"{**}");
+
+
+}
+/*dibuja un disparo, recibe un struct correspondiente al disparo a dibujar*/
+void draw_shot(struct shot shotD){
+
+    putc(shotD.y, shotD.x, BRIGHT, RED, ' ');
+}
+void clear_border(){
+    for (u8 x = 0; x < WELL_HEIGHT; x++) {
+        putc(WELL_Y, x + WELL_X , BLACK, BLACK, ' ');
+        putc(WELL_Y + WELL_WIDTH, x + WELL_X, BLACK, BLACK, ' ');
+        x++;
+    }
+
+    for (u8 x = 1; x < WELL_HEIGHT; x++) {
+        putc(WELL_Y, x + WELL_X , BLACK, BLACK, ' ');
+        putc(WELL_Y + WELL_WIDTH, x + WELL_X, BLACK, BLACK, ' ');
+        x++;
+    }
+}
+
+/* Dibuja las parades del primer nivel,
+ * la nave y las balas
+ * Usa WELL_Y que vale 30 y WELL_X que vale 5
+ * */
+void draw_first_stage(){
     u8 x, y;
 
     /* Border */
     for (x = 0; x < WELL_HEIGHT; x++) {
-        putc(WELL_Y, x + WELL_X , BLACK, RED, ' ');
-        putc(WELL_Y + 18, x + WELL_X, BLACK, GREEN, ' ');
+        putc(WELL_Y, x + WELL_X , BLACK, RED, ' '); //primer pared, empiza en la culumna #30
+        putc(WELL_Y + WELL_WIDTH, x + WELL_X, BLACK, RED, ' '); //segunda pared, empieza en la columna #48
+        x++;
+    }
+
+    for (x = 1; x < WELL_HEIGHT; x++) {
+        putc(WELL_Y, x + WELL_X , BLACK, MAGENTA, ' '); //primer pared, empiza en la culumna #30
+        putc(WELL_Y + WELL_WIDTH, x + WELL_X, BLACK, MAGENTA, ' '); //segunda pared, empieza en la columna #48
         x++;
     }
 
     /* Spaceship */
-    puts(spaceship.y, spaceship.x, GREEN, BLACK, "<^>");
+    //update_spaceship();
+    //puts(spaceship.y, spaceship.x, GREEN, BLACK, "<^>");
+
+    /*shot*/
+    //draw_shot(shotd);
 }
+
+
+/*no momento no se usa*/
 void first_stage(void){
     //bool updated = false;
 
     while(true) {
         u8 key1;
-        bool updated = false;
+       // bool updated = false;
         if ((key1 = scan())) {
 
             switch (key1) {
@@ -271,55 +547,103 @@ void first_stage(void){
                     move(5, 0);
                     break;
             }
-            updated = true;
+            //updated = true;
         }
-        if (updated) {
+        /*if (updated) {
             clear(BLACK);
-            draw_first_stage();
-        }
+            //draw_first_stage();
+        }*/
     }
     //goto loop;
 }
 
 noreturn main() {
+    {
+        clear(BLACK);
+        start_menu();
 
-    clear(BLACK);
-    start_menu();
+        /* Wait a full second to calibrate timing. */
+        u32 itpms;
+        tps();
+        itpms = tpms; while (tpms == itpms) tps();
+        itpms = tpms; while (tpms == itpms) tps();
 
-    /* Wait a full second to calibrate timing. */
-    /*u32 itpms;
-    tps();
-    itpms = tpms; while (tpms == itpms) tps();
-    itpms = tpms; while (tpms == itpms) tps();
-*/
-    spawn();
-    clear(BLACK);
-    draw_first_stage();
+        /* Initialize game state. Shuffle bag of tetriminos until first tetrimino
+         * is not S or Z. */
+        //do { shuffle(bag, BAG_SIZE); } while (bag[0] == 4 || bag[0] == 6);
+        //spawn();
+        //ghost();
+        spawn();
+        //spawn_shot();
+        //spawn_shot2();
+        spawn_enemy();
 
-    loop:
-    tps();
-
-    bool updated = false;
-
-    u8 key;
-    if ((key = scan())) {
-        switch(key) {
-            case KEY_LEFT:
-                move(-1, 0);
-                break;
-            case KEY_RIGHT:
-                move(1, 0);
-                break;
-        }
-        updated = true;
-    }
-
-    if (updated) {
         clear(BLACK);
         draw_first_stage();
-    }
 
-    goto loop;
+        bool debug = false, help = true, statistics = false;
+        s8 shoot = false;
+        s8 shot_b = 0;
+
+        loop:
+        /*if(counter == 100000){
+            spawn_enemy();
+        }*/
+
+        if(counter > 0){
+            counter--;
+        }
+        else{
+            move_enemy();
+            counter = 100000;
+        }
+
+        tps();
+
+        bool updated = false;
+
+        u8 key;
+        if ((key = scan())) {
+            switch(key) {
+                case KEY_LEFT:
+                    move(-1, 0);
+                    putc(spaceship.y + 3, spaceship.x, BLACK, BLACK, ' ');
+                    break;
+                case KEY_RIGHT:
+                    move(1, 0);
+                    putc(spaceship.y - 1, spaceship.x, BLACK, BLACK, ' ');
+                    break;
+                case KEY_SPACE:
+                    spawn_shot();
+                    shooting=true;
+                    break;
+                case KEY_P:
+                    if (game_over)
+                        break;
+                    clear(BLACK);
+                    paused = !paused;
+                    break;
+            }
+            updated = true;
+        }
+
+        if (!paused && !game_over && interval(TIMER_UPDATE, 20)) {
+
+            update_shot();
+        }
+            updated = true;
+
+
+        if (updated){
+            update_spaceship();
+            updated = false;
+        }
+
+        draw_first_stage();
+        clear_border();
+
+        goto loop;
+    }
 }
 
 
