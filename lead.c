@@ -193,6 +193,23 @@ u8 scan(void)
     else return 0;
 }
 
+/* Formatting */
+
+/* Format n in radix r (2-16) as a w length string. */
+char *itoa(u32 n, u8 r, u8 w)
+{
+    static const char d[16] = "0123456789ABCDEF";
+    static char s[34];
+    s[33] = 0;
+    u8 i = 33;
+    do {
+        i--;
+        s[i] = d[n % r];
+        n /= r;
+    } while (i > 33 - w);
+    return (char *) (s + i);
+}
+
 #define TITLE_X (COLS / 2 - 9)
 #define TITLE_Y (ROWS / 5)
 
@@ -235,7 +252,7 @@ void start_menu(){
 
 u8 space[WELL_HEIGHT][WELL_WIDTH];
 
-u32 score = 0, level = 1, speed = 1000;
+u32 score = 0, level = 1, speed = 20;
 
 bool paused = false, game_over = false;
 
@@ -250,8 +267,9 @@ struct shot{
 
 struct enemy{
     s8 x, y;
-    bool available;
-} enemy1;
+};
+
+struct enemy enemy1, enemy2, enemy3, enemy4, enemy5, enemy6;
 
 bool shooting = false;
 u64 counter = 100000;
@@ -355,7 +373,7 @@ bool move_shot(s8 dx){
 }
 
 
-void update_shot(){
+void update_shot(struct enemy *enemy){
 
     /*if(shooting){
          putc(shot1.y,shot1.x,BLACK,BLACK,' ');
@@ -368,11 +386,22 @@ void update_shot(){
          spawn_shot1();
      }*/
     if(current_shot.available == false && move_shot(current_shot.x - 1)){
-        if (current_shot.x == enemy1.x && (current_shot.y == enemy1.y || current_shot.y == enemy1.y+1 || current_shot.y == enemy1.y+2 || current_shot.y == enemy1.y+3)){
-            puts(enemy1.y, enemy1.x, BLACK, BLACK, "    ");
+        if (current_shot.x == enemy->x && (current_shot.y == enemy->y || current_shot.y == enemy->y+1 || current_shot.y == enemy->y+2 || current_shot.y == enemy->y+3)){
+            puts(enemy->y, enemy->x, BLACK, BLACK, "    ");
             putc(current_shot.y, current_shot.x, BLACK, BLACK, ' ');
             //spawn_shot();
-            spawn_enemy();
+            score += KILL_SCORE;
+            if (score >= SCORE_PER_LEVEL) {
+                level++;
+                score -= SCORE_PER_LEVEL;
+                main();
+/*
+                double speed_s = pow(0.8 - (level - 1) * 0.007, level - 1);
+                speed = speed_s * 1000;*/
+            }
+            current_shot.x = 0;
+            current_shot.y = 0;
+            spawn_enemy(enemy);
             counter = 100000;
         }
         else{
@@ -408,14 +437,17 @@ void update_shot(){
     //spawn()
 }
 
+
+/*
 void update(void)
 {
     //update_spaceship();
     update_shot();
     /*double speed_s = pow(0.8 - (level - 1) * 0.007, level - 1);
-    speed = speed_s * 1000;*/
+    speed = speed_s * 1000;
 
 }
+*/
 
 
 /* shot 2*/
@@ -465,28 +497,41 @@ void update_shot2()
     }
 }*/
 
-void spawn_enemy(){
-    enemy1.x = 4;
+/*Se genera un random que va a ser la columna donde va aparecer el enemigo*/
+void spawn_enemy(struct enemy *enemy){
+    enemy->x = 1;
     u32 random = 0;
     random = rand(26);
     random = random + 31;
-    enemy1.y = random;
-
+    enemy->y = random;
 }
 
-void move_enemy(){
-
-    puts(enemy1.y,enemy1.x,BLACK,BLACK,"    ");
-    enemy1.x = enemy1.x + 1;
-    puts(enemy1.y,enemy1.x,BLUE,BLACK,"{**}");
-
-
+/*verifica si el enemigo llega al final(a la parte inferior) de la pantalla*/
+bool collide_enemy(s8 x){
+    if(x > WELL_HEIGHT){
+        return true;
+    }
+    return false;
 }
+
+/*Dibuja el enemigo en pantalla*/
+void move_enemy(struct enemy *enemy){
+    if(collide_enemy(enemy->x)){
+        game_over = true;
+    } else{
+        puts(enemy->y,enemy->x,BLACK,BLACK,"    ");
+        enemy->x = enemy->x + 1;
+        puts(enemy->y,enemy->x,BLUE,BLACK,"{**}");
+    }
+}
+
 /*dibuja un disparo, recibe un struct correspondiente al disparo a dibujar*/
 void draw_shot(struct shot shotD){
 
     putc(shotD.y, shotD.x, BRIGHT, RED, ' ');
 }
+
+/*Pinta los bordes de negro*/
 void clear_border(){
     for (u8 x = 0; x < WELL_HEIGHT; x++) {
         putc(WELL_Y, x + WELL_X , BLACK, BLACK, ' ');
@@ -500,7 +545,11 @@ void clear_border(){
         x++;
     }
 }
+#define STATUS_X (COLS * 3/4)
+#define STATUS_Y (ROWS / 2 - 4)
 
+#define SCORE_X
+#define SCORE_Y (ROWS / 2 - 1)
 /* Dibuja las parades del primer nivel,
  * la nave y las balas
  * Usa WELL_Y que vale 30 y WELL_X que vale 5
@@ -521,6 +570,10 @@ void draw_first_stage(){
         x++;
     }
 
+    /* Score */
+    puts(44, 23, BLUE, BLACK, "SCORE");
+    puts(41, 24, BRIGHT | BLUE, BLACK, itoa(score, 10, 10));
+
     /* Spaceship */
     //update_spaceship();
     //puts(spaceship.y, spaceship.x, GREEN, BLACK, "<^>");
@@ -530,34 +583,7 @@ void draw_first_stage(){
 }
 
 
-/*no momento no se usa*/
-void first_stage(void){
-    //bool updated = false;
-
-    while(true) {
-        u8 key1;
-       // bool updated = false;
-        if ((key1 = scan())) {
-
-            switch (key1) {
-                case KEY_LEFT:
-                    move(-5, 0);
-                    break;
-                case KEY_RIGHT:
-                    move(5, 0);
-                    break;
-            }
-            //updated = true;
-        }
-        /*if (updated) {
-            clear(BLACK);
-            //draw_first_stage();
-        }*/
-    }
-    //goto loop;
-}
-
-noreturn main() {
+noreturn first_stage() {
     {
         clear(BLACK);
         start_menu();
@@ -576,7 +602,12 @@ noreturn main() {
         spawn();
         //spawn_shot();
         //spawn_shot2();
-        spawn_enemy();
+        spawn_enemy(&enemy1);
+        spawn_enemy(&enemy2);
+        spawn_enemy(&enemy3);
+        spawn_enemy(&enemy4);
+        spawn_enemy(&enemy5);
+        spawn_enemy(&enemy6);
 
         clear(BLACK);
         draw_first_stage();
@@ -594,7 +625,13 @@ noreturn main() {
             counter--;
         }
         else{
-            move_enemy();
+            move_enemy(&enemy1);
+            move_enemy(&enemy2);
+            move_enemy(&enemy3);
+            move_enemy(&enemy4);
+            move_enemy(&enemy5);
+            move_enemy(&enemy6);
+
             counter = 100000;
         }
 
@@ -627,16 +664,22 @@ noreturn main() {
             updated = true;
         }
 
-        if (!paused && !game_over && interval(TIMER_UPDATE, 20)) {
-
-            update_shot();
-        }
+        if (!paused && !game_over && interval(TIMER_UPDATE, speed)) {
+            update_shot(&enemy1);
+            update_shot(&enemy2);
+            update_shot(&enemy3);
+            update_shot(&enemy4);
+            update_shot(&enemy5);
+            update_shot(&enemy6);
             updated = true;
-
+        }
+        if(game_over){
+            main();
+        }
 
         if (updated){
             update_spaceship();
-            updated = false;
+            //updated = false;
         }
 
         draw_first_stage();
@@ -647,3 +690,6 @@ noreturn main() {
 }
 
 
+noreturn main(){
+    first_stage();
+}

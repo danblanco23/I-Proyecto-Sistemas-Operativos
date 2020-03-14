@@ -25,7 +25,7 @@
 
 /* Factor by which to multiply the number of rows dropped to increase the score
  * for a hard drop */
-#define HARD_DROP_SCORE_FACTOR (2)
+#define KILL_SCORE (10)
 
 /* Number of rows that need to be cleared to increase level */
-#define ROWS_PER_LEVEL (10)
+#define SCORE_PER_LEVEL (100)
